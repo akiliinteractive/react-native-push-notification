@@ -4,14 +4,15 @@ package com.dieam.reactnativepushnotification.modules;
 import android.app.AlarmManager;
 import android.app.Application;
 import android.app.Notification;
+import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.content.pm.ResolveInfo;
+import android.content.pm.PackageManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
-import android.content.pm.ResolveInfo;
-import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -30,14 +31,14 @@ import org.json.JSONException;
 
 import java.util.Arrays;
 import java.util.List;
-
 import static com.dieam.reactnativepushnotification.modules.RNPushNotification.LOG_TAG;
 import static com.dieam.reactnativepushnotification.modules.RNPushNotificationAttributes.fromJson;
 
 public class RNPushNotificationHelper {
     public static final String PREFERENCES_KEY = "rn_push_notification";
-    public static final String CUSTOM_NOTIFICATION_CATEGORY = "com.dieam.reactnativepushnotification.intent.category.NOTIFY";
     private static final long DEFAULT_VIBRATION = 300L;
+    private static final String NOTIFICATION_CHANNEL_ID = "rn-push-notification-channel-id";
+    public static final String CUSTOM_NOTIFICATION_CATEGORY = "com.dieam.reactnativepushnotification.intent.category.NOTIFY";
 
     private Context context;
     private final SharedPreferences scheduledNotificationsPersistence;
@@ -51,30 +52,23 @@ public class RNPushNotificationHelper {
     }
 
     private static String getCustomNotificationActivityClassName(Context context) {
-
-        PackageManager pm = context.getPackageManager();
-
-        Intent intent = new Intent(Intent.ACTION_MAIN);
-        intent.addCategory(CUSTOM_NOTIFICATION_CATEGORY);
-
-        List<ResolveInfo> resolveInfos = pm.queryIntentActivities(intent, 0);
-        for (ResolveInfo resolveInfo : resolveInfos) {
-            String pkgName = resolveInfo.activityInfo.applicationInfo.packageName;
-            if (pkgName.equalsIgnoreCase(context.getPackageName())) {
-                String className = resolveInfo.activityInfo.name;
-                return className;
-            }
-        }
-        return null;
-    }
-
-    private static String getLauncherClassName(Context context) {
-        String packageName = context.getPackageName();
-        Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(packageName);
-        return launchIntent.getComponent().getClassName();
+      PackageManager pm = context.getPackageManager();
+      Intent intent = new Intent(Intent.ACTION_MAIN);
+      intent.addCategory(CUSTOM_NOTIFICATION_CATEGORY);
+      List<ResolveInfo> resolveInfos = pm.queryIntentActivities(intent, 0);
+      for (ResolveInfo resolveInfo : resolveInfos) {
+          String pkgName = resolveInfo.activityInfo.applicationInfo.packageName;
+          if (pkgName.equalsIgnoreCase(context.getPackageName())) {
+              String className = resolveInfo.activityInfo.name;
+              return className;
+          }
+      }
+      return null;
     }
 
     public Class getMainActivityClass() {
+        String packageName = context.getPackageName();
+        Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(packageName);
         String customIntentClassName = getCustomNotificationActivityClassName(context);
         String launchIntentClassName = getLauncherClassName(context);
         String className = customIntentClassName == null ? launchIntentClassName : customIntentClassName;
@@ -85,6 +79,13 @@ public class RNPushNotificationHelper {
             return null;
         }
     }
+
+    private static String getLauncherClassName(Context context) {
+      String packageName = context.getPackageName();
+      Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(packageName);
+      String className = launchIntent.getComponent().getClassName();
+      return launchIntent.getComponent().getClassName();
+  }
 
     private AlarmManager getAlarmManager() {
         return (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
@@ -185,7 +186,7 @@ public class RNPushNotificationHelper {
                 title = context.getPackageManager().getApplicationLabel(appInfo).toString();
             }
 
-            NotificationCompat.Builder notification = new NotificationCompat.Builder(context)
+            NotificationCompat.Builder notification = new NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
                     .setContentTitle(title)
                     .setTicker(bundle.getString("ticker"))
                     .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
@@ -300,6 +301,7 @@ public class RNPushNotificationHelper {
                     PendingIntent.FLAG_UPDATE_CURRENT);
 
             NotificationManager notificationManager = notificationManager();
+            checkOrCreateChannel(notificationManager);
 
             notification.setContentIntent(pendingIntent);
 
@@ -434,6 +436,13 @@ public class RNPushNotificationHelper {
         notificationManager.cancelAll();
     }
 
+    public void clearNotification(int notificationID) {
+        Log.i(LOG_TAG, "Clearing notification: " + notificationID);
+
+        NotificationManager notificationManager = notificationManager();
+        notificationManager.cancel(notificationID);
+    }
+
     public void cancelAllScheduledNotifications() {
         Log.i(LOG_TAG, "Cancelling all notifications");
 
@@ -491,5 +500,24 @@ public class RNPushNotificationHelper {
         } else {
             editor.apply();
         }
+    }
+
+    private static boolean channelCreated = false;
+    private static void checkOrCreateChannel(NotificationManager manager) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O)
+            return;
+        if (channelCreated)
+            return;
+        if (manager == null)
+            return;
+
+        final CharSequence name = "rn-push-notification-channel";
+        int importance = NotificationManager.IMPORTANCE_DEFAULT;
+        NotificationChannel channel = new NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance);
+        channel.enableLights(true);
+        channel.enableVibration(true);
+
+        manager.createNotificationChannel(channel);
+        channelCreated = true;
     }
 }
